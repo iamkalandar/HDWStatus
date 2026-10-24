@@ -120,7 +120,7 @@ jobs:
                           .build();
 
                   List<Effect> vfx = new ArrayList<Effect>();
-                  vfx.add(Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT));
+                  vfx.add(Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP));
                   if (overlay != null && overlay.length() > 0) {
                       byte[] bytes = Base64.decode(overlay, Base64.DEFAULT);
                       Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
