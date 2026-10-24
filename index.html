@@ -211,6 +211,7 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:v
 
     <div class="panel" id="p-out" role="tabpanel" hidden>
       <div class="field"><span class="lbl">Quality</span><div class="chips" id="quals"></div></div>
+      <div class="field" id="fmtBox"><span class="lbl">Format</span><div class="chips" id="fmts"></div></div>
       <div id="splitBox" style="display:grid;gap:12px">
         <label class="check"><input type="checkbox" id="split" checked> Split long videos into parts</label>
         <div class="field" id="lenBox"><span class="lbl">Part length</span><div class="chips" id="lens"></div></div>
@@ -268,7 +269,7 @@ var QUAL={
   hd:{label:"HD",note:"720p, best balance for Status",short:720,vbps:3500000,img:1600,jq:.88},
   full:{label:"Full HD",note:"1080p, sharpest, biggest file",short:1080,vbps:6000000,img:2200,jq:.93}
 };
-var S={file:null,kind:null,url:null,w:0,h:0,dur:0,start:0,end:0,items:[],sel:null,q:"hd",split:true,partLen:30,tab:"text",stageH:400,outs:[],cancel:false,nid:1};
+var S={file:null,kind:null,url:null,w:0,h:0,dur:0,start:0,end:0,items:[],sel:null,q:"hd",fmt:"auto",split:true,partLen:30,tab:"text",stageH:400,outs:[],cancel:false,nid:1};
 var CAP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
 function blobB64(b){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(",")[1])};r.onerror=rej;r.readAsDataURL(b)})}
 var DL=CAP?{save:async function(req){var P=window.Capacitor.Plugins;var data=await blobB64(req.data);var w=await P.Filesystem.writeFile({path:req.filename,data:data,directory:"CACHE"});await P.Share.share({title:"ClearStory",files:[w.uri],dialogTitle:"Save or send"});return {status:"saved"};}}:null;
@@ -450,6 +451,8 @@ function buildStyleChips(){
 }
 function buildOutChips(){
   chips($("#quals"),Object.keys(QUAL).map(function(k){return {v:k,label:QUAL[k].label,sub:QUAL[k].note}}),S.q,function(v){ S.q=v; buildOutChips(); refreshAll(); });
+  chips($("#fmts"),[{v:"auto",label:"MP4",sub:"Best for WhatsApp"},{v:"webm",label:"WebM",sub:"Use if MP4 stops early"}],S.fmt,function(v){ S.fmt=v; buildOutChips(); });
+  $("#fmtBox").hidden=S.kind!=="video";
   chips($("#lens"),[30,60,90].map(function(n){return {v:n,label:n+" s"}}),S.partLen,function(v){ S.partLen=v; buildOutChips(); refreshAll(); });
   $("#lenBox").hidden=!S.split;
 }
@@ -537,12 +540,19 @@ function exportPhoto(){
 /* ---------- export: video ---------- */
 function pickMime(){
   if(!window.MediaRecorder||!HTMLCanvasElement.prototype.captureStream) return null;
-  var c=["video/mp4;codecs=avc1.42E01E,mp4a.40.2","video/mp4;codecs=avc1,mp4a.40.2","video/mp4","video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
+  var mp4=["video/mp4;codecs=avc1.42E01E,mp4a.40.2","video/mp4;codecs=avc1,mp4a.40.2","video/mp4"], wb=["video/webm;codecs=vp8,opus","video/webm;codecs=vp9,opus","video/webm"];
+  var c=S.fmt==="webm"?wb.concat(mp4):mp4.concat(wb);
   for(var i=0;i<c.length;i++){ if(MediaRecorder.isTypeSupported(c[i])) return c[i]; }
   return null;
 }
 function seek(v,t){ return new Promise(function(res){ if(Math.abs(v.currentTime-t)<.02){ res(); return; } var h=function(){ v.removeEventListener("seeked",h); res(); }; v.addEventListener("seeked",h); v.currentTime=t; }); }
+var capAudio=null;
 function setupAudio(){
+  capAudio=null; audioDest=null;
+  try{
+    var cs=media.captureStream?media.captureStream():null;
+    if(cs&&cs.getAudioTracks().length){ capAudio=cs.getAudioTracks(); media.muted=true; return; }
+  }catch(e){}
   try{
     var AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
     if(!audioCtx){ audioCtx=new AC(); srcNode=audioCtx.createMediaElementSource(media); audioDest=audioCtx.createMediaStreamDestination(); }
@@ -551,23 +561,29 @@ function setupAudio(){
     srcNode.connect(audioDest);
   }catch(e){ audioDest=null; }
 }
-function restoreAudio(){ try{ if(srcNode&&audioCtx){ srcNode.disconnect(); srcNode.connect(audioCtx.destination); } }catch(_){} }
+function restoreAudio(){ try{ media.muted=false; }catch(_){}
+  try{ if(srcNode&&audioCtx){ srcNode.disconnect(); srcNode.connect(audioCtx.destination); } }catch(_){} }
 
 async function recordPart(a,b,idx,total,mime,d,q){
   var v=media; await seek(v,a);
   var c=document.createElement("canvas"); c.width=d.W; c.height=d.H; var x=c.getContext("2d");
   var stream=c.captureStream(30);
-  if(audioDest){ audioDest.stream.getAudioTracks().forEach(function(t){ stream.addTrack(t); }); }
-  var opts={mimeType:mime,videoBitsPerSecond:q.vbps}; if(audioDest) opts.audioBitsPerSecond=128000;
+  var hasA=false;
+  if(capAudio){ capAudio.forEach(function(t){ stream.addTrack(t); hasA=true; }); }
+  else if(audioDest){ audioDest.stream.getAudioTracks().forEach(function(t){ stream.addTrack(t); hasA=true; }); }
+  var opts={mimeType:mime,videoBitsPerSecond:q.vbps}; if(hasA) opts.audioBitsPerSecond=128000;
   var rec=new MediaRecorder(stream,opts), chunks=[];
   rec.ondataavailable=function(e){ if(e.data&&e.data.size) chunks.push(e.data); };
+  var recErr=null; rec.onerror=function(e){ recErr=(e&&e.error&&e.error.message)||"encoder error"; };
   var stopped=new Promise(function(r){ rec.onstop=r; });
   function frame(){ x.drawImage(v,0,0,d.W,d.H); drawItems(x,d.W,d.H); }
-  frame(); rec.start(250);
+  frame(); rec.start();
   await v.play();
+  var lastT=v.currentTime, lastAt=Date.now(), stall=false;
   await new Promise(function(res){
     (function tick(){
-      if(S.cancel){ res(); return; }
+      if(S.cancel||recErr||rec.state==="inactive"){ res(); return; }
+      if(v.currentTime!==lastT){ lastT=v.currentTime; lastAt=Date.now(); } else if(Date.now()-lastAt>5000){ stall=true; res(); return; }
       frame();
       var p=Math.min(1,Math.max(0,(v.currentTime-a)/(b-a)));
       setProgress((idx+p)/total, total>1?("Part "+(idx+1)+" of "+total):"Working");
@@ -578,8 +594,14 @@ async function recordPart(a,b,idx,total,mime,d,q){
   v.pause(); frame();
   try{ rec.requestData(); }catch(_){}
   rec.stop(); await stopped;
-  stream.getTracks().forEach(function(t){ t.stop(); });
-  return new Blob(chunks,{type:mime.split(";")[0]});
+  stream.getVideoTracks().forEach(function(t){ t.stop(); });
+  var got=Math.min(b,v.currentTime)-a;
+  if(!S.cancel){
+    if(recErr) throw new Error("The phone's video encoder stopped after "+got.toFixed(1)+" s ("+recErr+"). Open Output and choose WebM or Small quality, then try again.");
+    if(stall) throw new Error("Playback stalled after "+got.toFixed(1)+" s. Close other apps, or choose Small quality, then try again.");
+    if(got<(b-a)-1.5 && !v.ended) throw new Error("Recording stopped after "+got.toFixed(1)+" s instead of "+(b-a).toFixed(1)+" s. Open Output and choose WebM or Small quality, then try again.");
+  }
+  return {blob:new Blob(chunks,{type:mime.split(";")[0]}),secs:got};
 }
 async function exportVideo(){
   var mime=pickMime(); if(!mime) throw new Error("This browser can't compress video. Try the latest Chrome, Edge or Safari.");
@@ -588,10 +610,10 @@ async function exportVideo(){
   try{
     for(var i=0;i<r.length;i++){
       if(S.cancel) break;
-      var blob=await recordPart(r[i][0],r[i][1],i,r.length,mime,d,q);
+      var rp=await recordPart(r[i][0],r[i][1],i,r.length,mime,d,q), blob=rp.blob;
       if(S.cancel) break;
       var nm="clearstory-"+(r.length>1?(i+1)+"of"+r.length:"video")+"."+ext;
-      outs.push({blob:blob,name:nm,w:d.W,h:d.H,dur:r[i][1]-r[i][0]});
+      outs.push({blob:blob,name:nm,w:d.W,h:d.H,dur:rp.secs});
     }
   } finally { restoreAudio(); }
   return outs;
