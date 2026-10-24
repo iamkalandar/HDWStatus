@@ -1,10 +1,11 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark">
-<title>ClearStory</title>
+<title>HDW Status</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=DM+Sans:wght@400;500;700&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;600&family=Pacifico&display=swap">
 <style>
 html{-webkit-text-size-adjust:100%}
 body{margin:0;padding-top:max(env(safe-area-inset-top,0px),12px)}
+.native body{padding-top:max(env(safe-area-inset-top,0px),44px)}
 
 /* Layout: one centered phone-width column. Pick -> edit (stage, tools, sticky action bar) -> result list. */
 :root{
@@ -61,6 +62,11 @@ h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance;letter-spacing:
 .tips h3{font-size:14px;margin-bottom:6px}
 .tips ul{margin:0;padding-left:18px;color:var(--muted);font-size:13.5px}
 
+.about{margin:16px 0 0;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:grid;gap:8px}
+.about h3{font-size:14px}
+.about p{margin:0;color:var(--muted);font-size:13.5px}
+.about b{color:var(--fg)}
+.about a.btn{text-decoration:none;color:var(--fg)}
 /* editor */
 .meta{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;min-width:0}
 .fname{font-family:var(--f-mono);font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -133,7 +139,7 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:v
   <header class="top">
     <div class="brand">
       <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8" fill="var(--accent)"/><circle cx="16" cy="16" r="7" fill="none" stroke="var(--accent-fg)" stroke-width="2.5"/><circle cx="16" cy="16" r="2.5" fill="var(--accent-fg)"/></svg>
-      ClearStory
+      HDW Status
     </div>
     <span class="tag">HD status prep</span>
   </header>
@@ -142,7 +148,7 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:v
   <section id="pick">
     <div class="hero">
       <h1>Post sharp videos and photos to your Status.</h1>
-      <p>Chat apps squash big files and blur them. ClearStory shrinks the file first, on your device, so the quality you filmed is the quality people see.</p>
+      <p>Chat apps squash big files and blur them. HDW Status shrinks the file first, on your device, so the quality you filmed is the quality people see.</p>
     </div>
     <label class="drop" id="drop" for="file">
       <strong>Choose a video or photo</strong>
@@ -163,6 +169,12 @@ textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:v
         <li>Finish all edits here. Editing again after compressing costs quality.</li>
         <li>Use vertical footage so it fills the phone screen.</li>
       </ul>
+    </div>
+    <div class="about">
+      <h3>About</h3>
+      <p>HDW Status 1.0 · Developed by <b>Mohammed Kalander</b></p>
+      <p class="mono" id="devMail">iamkalandar@gmail.com</p>
+      <div class="pickrow" style="margin-top:4px"><a class="btn sm" href="mailto:iamkalandar@gmail.com?subject=HDWStatus%20feedback">Email developer</a><button class="btn sm" id="copyMail" type="button">Copy email</button></div>
     </div>
   </section>
 
@@ -265,14 +277,15 @@ var LOOKS={plain:"Shadow",neon:"Neon",box:"Box",outline:"Outline"};
 var COLORS=["#FFFFFF","#FFD60A","#FF5C7A","#3DDC97","#4CC9F0","#B388FF","#111111"];
 var EMOJI=["🔥","❤️","😂","😍","🎉","✨","👏","🙌","😎","🥳","💯","🌸","☀️","🌙","⭐","🎶","🙏","👍","💪","🍕"];
 var QUAL={
-  small:{label:"Small",note:"540p, quick to upload",short:540,vbps:1800000,img:960,jq:.74},
-  hd:{label:"HD",note:"720p, best balance for Status",short:720,vbps:3500000,img:1600,jq:.88},
-  full:{label:"Full HD",note:"1080p, sharpest, biggest file",short:1080,vbps:6000000,img:2200,jq:.93}
+  small:{label:"Small",note:"540p, about 9 MB per 30 s",short:540,vbps:2400000,img:960,jq:.74},
+  hd:{label:"HD",note:"720p, about 15 MB per 30 s",short:720,vbps:4000000,img:1600,jq:.88},
+  full:{label:"Full HD",note:"1080p, about 23 MB per 30 s",short:1080,vbps:6000000,img:2200,jq:.93}
 };
 var S={file:null,kind:null,url:null,w:0,h:0,dur:0,start:0,end:0,items:[],sel:null,q:"hd",fmt:"auto",split:true,partLen:30,tab:"text",stageH:400,outs:[],cancel:false,nid:1};
 var CAP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
 function blobB64(b){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(",")[1])};r.onerror=rej;r.readAsDataURL(b)})}
-var DL=CAP?{save:async function(req){var P=window.Capacitor.Plugins;var data=await blobB64(req.data);var w=await P.Filesystem.writeFile({path:req.filename,data:data,directory:"CACHE"});await P.Share.share({title:"ClearStory",files:[w.uri],dialogTitle:"Save or send"});return {status:"saved"};}}:null;
+if(CAP){ document.documentElement.classList.add("native"); }
+var DL=CAP?{save:async function(req){var P=window.Capacitor.Plugins;var data=await blobB64(req.data);var w=await P.Filesystem.writeFile({path:req.filename,data:data,directory:"CACHE"});await P.Share.share({title:"HDW Status",files:[w.uri],dialogTitle:"Save or send"});return {status:"saved"};}}:null;
 
 var media=null, audioCtx=null, srcNode=null, audioDest=null;
 var stage=$("#stage"), layer=$("#layer"), gv=$("#gv"), gh=$("#gh");
@@ -534,7 +547,7 @@ function exportPhoto(){
   var d=dims(), q=QUAL[S.q], c=document.createElement("canvas"); c.width=d.W; c.height=d.H;
   var x=c.getContext("2d"); x.fillStyle="#fff"; x.fillRect(0,0,d.W,d.H); x.imageSmoothingQuality="high"; x.drawImage(media,0,0,d.W,d.H);
   drawItems(x,d.W,d.H);
-  return new Promise(function(res,rej){ c.toBlob(function(b){ b?res([{blob:b,name:"clearstory-photo.jpg",w:d.W,h:d.H,dur:0}]):rej(new Error("Could not create the photo.")); },"image/jpeg",q.jq); });
+  return new Promise(function(res,rej){ c.toBlob(function(b){ b?res([{blob:b,name:"hdwstatus-photo.jpg",w:d.W,h:d.H,dur:0}]):rej(new Error("Could not create the photo.")); },"image/jpeg",q.jq); });
 }
 
 /* ---------- export: video ---------- */
@@ -566,7 +579,7 @@ function restoreAudio(){ try{ media.muted=false; }catch(_){}
 
 async function recordPart(a,b,idx,total,mime,d,q){
   var v=media; await seek(v,a);
-  var c=document.createElement("canvas"); c.width=d.W; c.height=d.H; var x=c.getContext("2d");
+  var c=document.createElement("canvas"); c.width=d.W; c.height=d.H; var x=c.getContext("2d"); x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high";
   var stream=c.captureStream(30);
   var hasA=false;
   if(capAudio){ capAudio.forEach(function(t){ stream.addTrack(t); hasA=true; }); }
@@ -580,18 +593,21 @@ async function recordPart(a,b,idx,total,mime,d,q){
   frame(); rec.start();
   await v.play();
   var lastT=v.currentTime, lastAt=Date.now(), stall=false;
+  var hasRVFC=!!v.requestVideoFrameCallback, newFrame=false, live=true;
+  function onF(){ if(!live) return; newFrame=true; v.requestVideoFrameCallback(onF); }
+  if(hasRVFC) v.requestVideoFrameCallback(onF);
   await new Promise(function(res){
     (function tick(){
       if(S.cancel||recErr||rec.state==="inactive"){ res(); return; }
       if(v.currentTime!==lastT){ lastT=v.currentTime; lastAt=Date.now(); } else if(Date.now()-lastAt>5000){ stall=true; res(); return; }
-      frame();
+      if(!hasRVFC||newFrame){ newFrame=false; frame(); }
       var p=Math.min(1,Math.max(0,(v.currentTime-a)/(b-a)));
       setProgress((idx+p)/total, total>1?("Part "+(idx+1)+" of "+total):"Working");
       if(v.currentTime>=b-.04||v.ended){ res(); return; }
       requestAnimationFrame(tick);
     })();
   });
-  v.pause(); frame();
+  live=false; v.pause(); frame();
   try{ rec.requestData(); }catch(_){}
   rec.stop(); await stopped;
   stream.getVideoTracks().forEach(function(t){ t.stop(); });
@@ -612,7 +628,7 @@ async function exportVideo(){
       if(S.cancel) break;
       var rp=await recordPart(r[i][0],r[i][1],i,r.length,mime,d,q), blob=rp.blob;
       if(S.cancel) break;
-      var nm="clearstory-"+(r.length>1?(i+1)+"of"+r.length:"video")+"."+ext;
+      var nm="hdwstatus-"+(r.length>1?(i+1)+"of"+r.length:"video")+"."+ext;
       outs.push({blob:blob,name:nm,w:d.W,h:d.H,dur:rp.secs});
     }
   } finally { restoreAudio(); }
@@ -676,6 +692,12 @@ async function saveOut(o,btn){
 $("#back").addEventListener("click",function(){ reset(); show("pick"); });
 $("#again").addEventListener("click",function(){ reset(); show("pick"); });
 $("#editMore").addEventListener("click",function(){ show("edit"); fitStage(); });
+$("#copyMail").addEventListener("click",function(){
+  var b=this, t="iamkalandar@gmail.com";
+  function ok(){ b.textContent="Copied"; setTimeout(function(){ b.textContent="Copy email"; },1800); }
+  function fb(){ var r=document.createRange(); r.selectNodeContents($("#devMail")); var se=window.getSelection(); se.removeAllRanges(); se.addRange(r); b.textContent="Selected"; }
+  try{ navigator.clipboard.writeText(t).then(ok,fb); }catch(e){ fb(); }
+});
 buildOutChips();
 })();
 </script>
