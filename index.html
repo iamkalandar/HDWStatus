@@ -285,7 +285,7 @@ var S={file:null,kind:null,url:null,w:0,h:0,dur:0,start:0,end:0,items:[],sel:nul
 var CAP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
 function blobB64(b){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(",")[1])};r.onerror=rej;r.readAsDataURL(b)})}
 if(CAP){ document.documentElement.classList.add("native"); }
-var DL=CAP?{save:async function(req){var P=window.Capacitor.Plugins;var data=await blobB64(req.data);var w=await P.Filesystem.writeFile({path:req.filename,data:data,directory:"CACHE"});await P.Share.share({title:"HDW Status",files:[w.uri],dialogTitle:"Save or send"});return {status:"saved"};}}:null;
+var DL=CAP?{save:async function(req){var P=window.Capacitor.Plugins;var uri=req.uri;if(!uri){var data=await blobB64(req.data);var w=await P.Filesystem.writeFile({path:req.filename,data:data,directory:"CACHE"});uri=w.uri;}await P.Share.share({title:"HDW Status",files:[uri],dialogTitle:"Save or send"});return {status:"saved"};}}:null;
 
 var media=null, audioCtx=null, srcNode=null, audioDest=null;
 var stage=$("#stage"), layer=$("#layer"), gv=$("#gv"), gh=$("#gh");
@@ -315,7 +315,7 @@ function reset(){
   layer.innerHTML=""; var old=stage.querySelector("video,img,.playbtn"); while(old){ old.remove(); old=stage.querySelector("video,img,.playbtn"); }
   try{ if(audioCtx){ audioCtx.close(); } }catch(e){}
   audioCtx=null; srcNode=null; audioDest=null; media=null;
-  S.items=[]; S.sel=null; S.file=null; S.url=null;
+  S.items=[]; S.sel=null; S.file=null; S.url=null; S.staged=null;
 }
 
 function load(file){
@@ -619,7 +619,39 @@ async function recordPart(a,b,idx,total,mime,d,q){
   }
   return {blob:new Blob(chunks,{type:mime.split(";")[0]}),secs:got};
 }
+async function exportNative(){
+  var P=window.Capacitor.Plugins, HV=P.HdwVideo;
+  var d=dims(), q=QUAL[S.q], r=ranges(), outs=[];
+  if(!S.staged){
+    var name="src-"+Date.now()+".mp4", CH=3*1024*1024, size=S.file.size;
+    for(var off=0;off<size;off+=CH){
+      if(S.cancel) return [];
+      var b64=await blobB64(S.file.slice(off,Math.min(size,off+CH)));
+      if(off===0) await P.Filesystem.writeFile({path:name,data:b64,directory:"CACHE"});
+      else await P.Filesystem.appendFile({path:name,data:b64,directory:"CACHE"});
+      setProgress(Math.min(1,(off+CH)/size)*0.2,"Preparing video");
+    }
+    var u=await P.Filesystem.getUri({path:name,directory:"CACHE"}); S.staged=u.uri;
+  }
+  var ov=null;
+  if(S.items.length){ var c=document.createElement("canvas"); c.width=d.W; c.height=d.H; drawItems(c.getContext("2d"),d.W,d.H); ov=c.toDataURL("image/png").split(",")[1]; }
+  for(var i=0;i<r.length;i++){
+    if(S.cancel) break;
+    var h=await HV.addListener("progress",function(e){ setProgress(0.2+0.8*(i+(e.progress||0))/r.length, r.length>1?("Part "+(i+1)+" of "+r.length):"Encoding"); });
+    var res;
+    try{ res=await HV.compress({path:S.staged,outName:"hdw-"+Date.now()+"-"+i+".mp4",startMs:Math.round(r[i][0]*1000),endMs:Math.round(r[i][1]*1000),width:d.W,height:d.H,bitrate:q.vbps,overlay:ov}); }
+    finally{ h.remove(); }
+    var url=window.Capacitor.convertFileSrc("file://"+res.path);
+    var blob=await (await fetch(url)).blob();
+    outs.push({blob:blob,nativeUri:"file://"+res.path,name:"hdwstatus-"+(r.length>1?(i+1)+"of"+r.length:"video")+".mp4",w:d.W,h:d.H,dur:r[i][1]-r[i][0]});
+  }
+  return outs;
+}
 async function exportVideo(){
+  if(CAP&&window.Capacitor.Plugins.HdwVideo){
+    try{ return await exportNative(); }
+    catch(e){ if(S.cancel) return []; S.nativeErr=(e&&e.message)||String(e); setProgress(0,"Using backup encoder"); }
+  }
   var mime=pickMime(); if(!mime) throw new Error("This browser can't compress video. Try the latest Chrome, Edge or Safari.");
   var ext=/mp4/.test(mime)?"mp4":"webm", d=dims(), q=QUAL[S.q], r=ranges(), outs=[];
   media.pause(); S.previewing=false; setupAudio();
@@ -637,7 +669,7 @@ async function exportVideo(){
 
 /* ---------- run ---------- */
 function setProgress(p,label){ $("#progBar").style.width=Math.round(p*100)+"%"; $("#busySub").textContent=label+" · "+Math.round(p*100)+"%"; }
-$("#cancel").addEventListener("click",function(){ S.cancel=true; });
+$("#cancel").addEventListener("click",function(){ S.cancel=true; try{ var HV=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.HdwVideo; if(HV) HV.cancel(); }catch(e){} });
 $("#go").addEventListener("click",async function(){
   $("#editErr").hidden=true; S.cancel=false;
   $("#busy").hidden=false; setProgress(0,S.kind==="video"?"Starting":"Working");
@@ -681,11 +713,12 @@ function showDone(outs){
   $("#saveNote").textContent=DL?(CAP?"Tap Save or share, then choose WhatsApp or Files. To post to Status, open WhatsApp, tap Status, and pick the saved file. Post parts in order.":"After saving, open WhatsApp, go to Status, and pick the file from your gallery. Post parts in order."):"Saving isn't available in this view. Open the artifact in the Claude app or on claude.ai to save files.";
   if(!DL){ box.querySelectorAll(".btn.primary").forEach(function(b){ b.disabled=true; }); }
   show("done");
+  if(S.nativeErr){ $("#saveNote").textContent+=" Fast encoder failed, backup used: "+S.nativeErr; S.nativeErr=null; }
 }
 async function saveOut(o,btn){
   if(!DL) return;
   btn.disabled=true; var t=btn.textContent; btn.textContent="Saving…";
-  try{ await DL.save({filename:o.name,data:o.blob}); btn.textContent="Saved"; }
+  try{ await DL.save({filename:o.name,data:o.blob,uri:o.nativeUri}); btn.textContent="Saved"; }
   catch(e){ btn.disabled=false; btn.textContent=(e&&(e.code==="declined"||/cancel/i.test(e.message||"")))?(CAP?"Save or share":"Save"):"Try again"; if(e&&e.code==="too_large"){ btn.textContent="Too large, pick Small"; } }
 }
 
