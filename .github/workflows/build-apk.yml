@@ -25,6 +25,197 @@ jobs:
           cp icon-only.png icon-foreground.png icon-background.png assets/
           npm install --save-dev @capacitor/assets
           npx capacitor-assets generate --android
+      - name: Add native video encoder
+        run: |
+          MAIN=$(find android/app/src/main/java -name MainActivity.java | head -1)
+          DIR=$(dirname "$MAIN")
+          PKG=$(grep -m1 '^package ' "$MAIN" | sed 's/package \(.*\);/\1/')
+          cat > "$DIR/HdwVideoPlugin.java" <<'EOF_PLUGIN'
+          package __PKG__;
+
+          import android.graphics.Bitmap;
+          import android.graphics.BitmapFactory;
+          import android.media.MediaCodecInfo;
+          import android.net.Uri;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.util.Base64;
+
+          import androidx.media3.common.Effect;
+          import androidx.media3.common.MediaItem;
+          import androidx.media3.common.MimeTypes;
+          import androidx.media3.common.audio.AudioProcessor;
+          import androidx.media3.common.util.UnstableApi;
+          import androidx.media3.common.Composition;
+          import androidx.media3.effect.BitmapOverlay;
+          import androidx.media3.effect.OverlayEffect;
+          import androidx.media3.effect.Presentation;
+          import androidx.media3.effect.TextureOverlay;
+          import androidx.media3.transformer.DefaultEncoderFactory;
+          import androidx.media3.transformer.EditedMediaItem;
+          import androidx.media3.transformer.Effects;
+          import androidx.media3.transformer.ExportException;
+          import androidx.media3.transformer.ExportResult;
+          import androidx.media3.transformer.ProgressHolder;
+          import androidx.media3.transformer.Transformer;
+          import androidx.media3.transformer.VideoEncoderSettings;
+
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import com.google.common.collect.ImmutableList;
+
+          import java.io.File;
+          import java.util.ArrayList;
+          import java.util.Collections;
+          import java.util.List;
+
+          @CapacitorPlugin(name = "HdwVideo")
+          @androidx.annotation.OptIn(markerClass = UnstableApi.class)
+          public class HdwVideoPlugin extends Plugin {
+              private Transformer current;
+              private final Handler main = new Handler(Looper.getMainLooper());
+
+              @PluginMethod
+              public void compress(final PluginCall call) {
+                  final String path = call.getString("path");
+                  final String outName = call.getString("outName", "hdw-out.mp4");
+                  final long startMs = call.getLong("startMs", 0L);
+                  final long endMs = call.getLong("endMs", 0L);
+                  final int width = call.getInt("width", 0);
+                  final int height = call.getInt("height", 0);
+                  final int bitrate = call.getInt("bitrate", 4000000);
+                  final String overlay = call.getString("overlay");
+                  if (path == null || width <= 0 || height <= 0) {
+                      call.reject("Missing video path or size");
+                      return;
+                  }
+                  main.post(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              start(call, path, outName, startMs, endMs, width, height, bitrate, overlay);
+                          } catch (Exception e) {
+                              call.reject("Setup failed: " + e.getMessage());
+                          }
+                      }
+                  });
+              }
+
+              private void start(final PluginCall call, String path, String outName, long startMs, long endMs,
+                                 int width, int height, int bitrate, String overlay) {
+                  String p = path.startsWith("file://") ? Uri.parse(path).getPath() : path;
+                  File in = new File(p);
+                  final File out = new File(getContext().getCacheDir(), outName);
+                  if (out.exists()) out.delete();
+
+                  MediaItem.ClippingConfiguration.Builder cb =
+                          new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs);
+                  if (endMs > startMs) cb.setEndPositionMs(endMs);
+                  MediaItem item = new MediaItem.Builder()
+                          .setUri(Uri.fromFile(in))
+                          .setClippingConfiguration(cb.build())
+                          .build();
+
+                  List<Effect> vfx = new ArrayList<Effect>();
+                  vfx.add(Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT));
+                  if (overlay != null && overlay.length() > 0) {
+                      byte[] bytes = Base64.decode(overlay, Base64.DEFAULT);
+                      Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                      if (bmp != null) {
+                          ImmutableList<TextureOverlay> list =
+                                  ImmutableList.<TextureOverlay>of(BitmapOverlay.createStaticBitmapOverlay(bmp));
+                          vfx.add(new OverlayEffect(list));
+                      }
+                  }
+                  EditedMediaItem edited = new EditedMediaItem.Builder(item)
+                          .setEffects(new Effects(Collections.<AudioProcessor>emptyList(), vfx))
+                          .build();
+
+                  VideoEncoderSettings ves = new VideoEncoderSettings.Builder()
+                          .setBitrate(bitrate)
+                          .setBitrateMode(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+                          .build();
+                  DefaultEncoderFactory ef = new DefaultEncoderFactory.Builder(getContext())
+                          .setRequestedVideoEncoderSettings(ves)
+                          .setEnableFallback(true)
+                          .build();
+
+                  final Transformer t = new Transformer.Builder(getContext())
+                          .setVideoMimeType(MimeTypes.VIDEO_H264)
+                          .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                          .setEncoderFactory(ef)
+                          .addListener(new Transformer.Listener() {
+                              @Override
+                              public void onCompleted(Composition composition, ExportResult exportResult) {
+                                  current = null;
+                                  JSObject o = new JSObject();
+                                  o.put("path", out.getAbsolutePath());
+                                  o.put("size", out.length());
+                                  call.resolve(o);
+                              }
+
+                              @Override
+                              public void onError(Composition composition, ExportResult exportResult,
+                                                  ExportException exportException) {
+                                  current = null;
+                                  call.reject("Encoder error: " + exportException.getMessage());
+                              }
+                          })
+                          .build();
+                  current = t;
+                  t.start(edited, out.getAbsolutePath());
+
+                  final ProgressHolder ph = new ProgressHolder();
+                  main.postDelayed(new Runnable() {
+                      @Override
+                      public void run() {
+                          if (current != t) return;
+                          if (t.getProgress(ph) != Transformer.PROGRESS_STATE_NOT_STARTED) {
+                              JSObject o = new JSObject();
+                              o.put("progress", ph.progress / 100.0);
+                              notifyListeners("progress", o);
+                          }
+                          main.postDelayed(this, 300);
+                      }
+                  }, 300);
+              }
+
+              @PluginMethod
+              public void cancel(final PluginCall call) {
+                  main.post(new Runnable() {
+                      @Override
+                      public void run() {
+                          if (current != null) {
+                              current.cancel();
+                              current = null;
+                          }
+                          call.resolve();
+                      }
+                  });
+              }
+          }
+          EOF_PLUGIN
+          cat > "$MAIN" <<'EOF_MAIN'
+          package __PKG__;
+
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(HdwVideoPlugin.class);
+                  super.onCreate(savedInstanceState);
+              }
+          }
+          EOF_MAIN
+          sed -i "s/__PKG__/$PKG/" "$DIR/HdwVideoPlugin.java" "$MAIN"
+          sed -i '/^dependencies {/a\    implementation "androidx.media3:media3-transformer:1.5.1"' android/app/build.gradle
+          sed -i '/^dependencies {/a\    implementation "androidx.media3:media3-effect:1.5.1"' android/app/build.gradle
+          sed -i '/^dependencies {/a\    implementation "androidx.media3:media3-common:1.5.1"' android/app/build.gradle
       - run: npx cap sync android
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
