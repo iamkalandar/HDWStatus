@@ -18,9 +18,12 @@ jobs:
       - run: npm install
       - run: mkdir -p www && cp index.html www/
       - run: npx cap add android
+      - run: mkdir -p assets && cp icon-only.png icon-foreground.png icon-background.png assets/
+      - run: npm install --save-dev @capacitor/assets
+      - run: npx capacitor-assets generate --android
       - run: npx cap sync android
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: ClearStory-debug-apk
+          name: HDW-Status-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
