@@ -277,9 +277,9 @@ var LOOKS={plain:"Shadow",neon:"Neon",box:"Box",outline:"Outline"};
 var COLORS=["#FFFFFF","#FFD60A","#FF5C7A","#3DDC97","#4CC9F0","#B388FF","#111111"];
 var EMOJI=["🔥","❤️","😂","😍","🎉","✨","👏","🙌","😎","🥳","💯","🌸","☀️","🌙","⭐","🎶","🙏","👍","💪","🍕"];
 var QUAL={
-  small:{label:"Small",note:"540p, about 9 MB per 30 s",short:540,vbps:2400000,img:960,jq:.74},
-  hd:{label:"HD",note:"720p, about 15 MB per 30 s",short:720,vbps:4000000,img:1600,jq:.88},
-  full:{label:"Full HD",note:"1080p, about 23 MB per 30 s",short:1080,vbps:6000000,img:2200,jq:.93}
+  small:{label:"Small",note:"Smaller file, about 9 MB per 30 s",short:540,vbps:2400000,img:960,jq:.74},
+  hd:{label:"HD",note:"Balanced, about 15 MB per 30 s",short:720,vbps:4000000,img:1600,jq:.88},
+  full:{label:"Full HD",note:"Highest quality, about 23 MB per 30 s",short:1080,vbps:6000000,img:2200,jq:.93}
 };
 var S={file:null,kind:null,url:null,w:0,h:0,dur:0,start:0,end:0,items:[],sel:null,q:"hd",fmt:"auto",split:true,partLen:30,tab:"text",stageH:400,outs:[],cancel:false,nid:1};
 var CAP=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
@@ -486,6 +486,7 @@ $("#prev").addEventListener("click",function(){ if(media){ media.currentTime=S.s
 
 /* ---------- estimates ---------- */
 function dims(){
+  if(S.kind==="video"){ return S.h>=S.w?{W:768,H:1280}:{W:1280,H:768}; }
   var q=QUAL[S.q]; var sc=Math.min(1,q.short/Math.min(S.w,S.h));
   if(S.kind==="image"){ sc=Math.min(1,q.img/Math.max(S.w,S.h)); }
   return {W:even(S.w*sc),H:even(S.h*sc)};
@@ -518,6 +519,11 @@ function refreshAll(){
 }
 
 /* ---------- drawing overlays ---------- */
+function drawCover(ctx,img,sw,sh,dw,dh){
+  var sr=sw/sh, dr=dw/dh, cx=0, cy=0, cw=sw, ch=sh;
+  if(sr>dr){ cw=sh*dr; cx=(sw-cw)/2; } else { ch=sw/dr; cy=(sh-ch)/2; }
+  ctx.drawImage(img,cx,cy,cw,ch,0,0,dw,dh);
+}
 function rr(ctx,x,y,w,h,r){ ctx.beginPath(); if(ctx.roundRect){ ctx.roundRect(x,y,w,h,r); } else { ctx.rect(x,y,w,h); } }
 function drawItems(ctx,W,H){
   ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.lineJoin="round";
@@ -589,7 +595,7 @@ async function recordPart(a,b,idx,total,mime,d,q){
   rec.ondataavailable=function(e){ if(e.data&&e.data.size) chunks.push(e.data); };
   var recErr=null; rec.onerror=function(e){ recErr=(e&&e.error&&e.error.message)||"encoder error"; };
   var stopped=new Promise(function(r){ rec.onstop=r; });
-  function frame(){ x.drawImage(v,0,0,d.W,d.H); drawItems(x,d.W,d.H); }
+  function frame(){ drawCover(x,v,S.w,S.h,d.W,d.H); drawItems(x,d.W,d.H); }
   frame(); rec.start();
   await v.play();
   var lastT=v.currentTime, lastAt=Date.now(), stall=false;
